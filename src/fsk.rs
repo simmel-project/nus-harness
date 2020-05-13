@@ -38,8 +38,8 @@ impl FskEncoder {
     }
 
     // does what you think it does -- input data should be uint8 array, outputdata is floats
-    pub fn modulate(&mut self, input: &[u8]) -> Vec<f64> {
-        let mut output: Vec<f64> = Vec::new();
+    pub fn modulate(&mut self, input: &[u8], output: &mut Vec<f64>) {
+        // let mut output: Vec<f64> = Vec::new();
         self.data_pos = 0;
 
         /* We keep these values the same between runs */
@@ -61,7 +61,7 @@ impl FskEncoder {
                         self.data_pos += 1;
                         self.bit_pos = 8;
                     } else {
-                        return output;
+                        break;
                     }
                 }
                 self.current_bit = self.current_byte & 1;

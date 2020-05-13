@@ -69,6 +69,7 @@ struct ModulationConfig {
     data_rate: EncodingRate,
     os_update: bool,
     version: controller::ProtocolVersion,
+    silence_prefix: Option<u32>,
     repeat_count: u32,
     sample_rate: f64,
     baud_rate: f64,
@@ -104,6 +105,9 @@ fn do_modulation(
     };
     let mut audio_data: Vec<f64> = vec![];
 
+    if let Some(silence_msec) = cfg.silence_prefix {
+        controller.make_silence(silence_msec, &mut audio_data);
+    }
     for _ in 0..cfg.repeat_count {
         controller.encode(&input_data, &mut audio_data, &cfg.data_rate);
         let mut pilot_controller = controller::Controller::new(
@@ -293,6 +297,13 @@ fn main() -> Result<(), ModulationError> {
                 .default_value("12500")
                 .help("Lower frequency used for F_HI / F_MARK"),
         )
+        .arg(
+            Arg::with_name("silence-prefix")
+                .long("silence-prefix")
+                .value_name("MSECS")
+                .takes_value(true)
+                .help("Number of milliseconds of silence to add to the start"),
+        )
         .get_matches();
 
     let source_filename = matches.value_of("input").unwrap();
@@ -300,6 +311,7 @@ fn main() -> Result<(), ModulationError> {
     let os_update = matches.is_present("update");
     let play_file = matches.is_present("play");
     let repeats = matches.value_of("repeats").unwrap().parse::<u32>().unwrap();
+    let silence_prefix = matches.value_of("silence-prefix").map(|s| s.parse::<u32>().unwrap());
     let output_sample_rate = if play_file {
         let endpoint = cpal::default_endpoint().expect("Failed to get default endpoint");
         let format = endpoint
@@ -353,6 +365,7 @@ fn main() -> Result<(), ModulationError> {
         baud_rate,
         f_lo,
         f_hi,
+        silence_prefix,
         version: protocol_version,
         repeat_count: repeats,
         sample_rate: output_sample_rate,

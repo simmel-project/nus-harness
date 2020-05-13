@@ -222,12 +222,9 @@ impl Controller {
         packet
     }
 
-    pub fn make_silence(&mut self, msecs: u32) -> Vec<f64> {
-        let mut buffer: Vec<f64> = vec![];
-
+    pub fn make_silence(&mut self, msecs: u32, buffer: &mut Vec<f64>) {
         let silence_length = (self.rate / (1000.0 / msecs as f64)).ceil() as usize;
-        buffer.resize(silence_length, 0f64);
-        buffer
+        buffer.resize(buffer.len() + silence_length, 0f64);
     }
 
     pub fn make_zero(&mut self, number: u32) -> Vec<u8> {
@@ -241,8 +238,7 @@ impl Controller {
     pub fn pilot(&mut self, output: &mut Vec<f64>, rate: &EncodingRate) {
         if *rate == EncodingRate::Low {
             let data = self.make_zero(4000); // ~0.5secs
-            let mut audio = self.modulator.modulate_pcm(&data);
-            output.append(&mut audio);
+            self.modulator.modulate_pcm(&data, output);
         } else {
             // // no preamble at high rate, this is the default
             // let data = self.make_one(3000); // ~0.5secs
@@ -259,23 +255,18 @@ impl Controller {
         // Note: Maximum of 65536 blocks
         let blocks = ((file_length as f64 / 256.0).ceil()) as u16;
 
-        let mut audio = self.make_silence(250 / silence_divisor);
-        output.append(&mut audio);
+        self.make_silence(250 / silence_divisor, output);
 
         let data = self.make_control_packet(&input);
-        let mut audio = self.modulator.modulate_pcm(&data);
-        output.append(&mut audio);
+        self.modulator.modulate_pcm(&data, output);
 
-        let mut audio = self.make_silence(100 / silence_divisor);
-        output.append(&mut audio);
+        self.make_silence(100 / silence_divisor, output);
 
         // Make two header packets
         let data = self.make_control_packet(&input);
-        let mut audio = self.modulator.modulate_pcm(&data);
-        output.append(&mut audio);
+        self.modulator.modulate_pcm(&data, output);
 
-        let mut audio = self.make_silence(500 / silence_divisor);
-        output.append(&mut audio);
+        self.make_silence(500 / silence_divisor, output);
 
         for mut packet_num in 0..blocks {
             packet_num &= 0xff;
@@ -290,14 +281,11 @@ impl Controller {
                 }
             }
             let data = self.make_data_packet(&packet_data, packet_num as u16);
-            let mut audio = self.modulator.modulate_pcm(&data);
-            output.append(&mut audio);
+            self.modulator.modulate_pcm(&data, output);
 
-            let mut audio = self.make_silence(80 / silence_divisor);
-            output.append(&mut audio);
+            self.make_silence(80 / silence_divisor, output);
         }
 
-        let mut audio = self.make_silence(500 / silence_divisor);
-        output.append(&mut audio);
+        self.make_silence(500 / silence_divisor, output);
     }
 }

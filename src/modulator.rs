@@ -10,7 +10,7 @@ impl Modulator {
     }
 
     // Modulate an array of 8-bit bytes into an array of signed 16-bit PCM samples
-    pub fn modulate_pcm(&mut self, input: &[u8]) -> Vec<f64> {
-        self.encoder.modulate(input)
+    pub fn modulate_pcm(&mut self, input: &[u8], output: &mut Vec<f64>) {
+        self.encoder.modulate(input, output)
     }
 }
