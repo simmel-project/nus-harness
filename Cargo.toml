@@ -1,0 +1,15 @@
+[package]
+name = "nus-tests"
+version = "1.0.0"
+description = "Run several experiments for Near UltraSound"
+authors = ["Sean Cross <sean@xobs.io>"]
+license = "MIT"
+edition = "2018"
+repository = "https://github.com/simmel-project/nus-tests"
+
+[dependencies]
+byteorder = "1.0.0"
+clap = "2.19.3"
+cpal = "0.5.1"
+murmur3 = "0.3.0"
+rust-crypto = "0.2.36"
