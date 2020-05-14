@@ -203,7 +203,7 @@ int main(int argc, char **argv) {
     }
 
     uint32_t sample_rate = strtoul(argv[2], NULL, 0);
-    float baud_rate = strtof(argv[3], NULL);
+    uint32_t baud_rate = strtoul(argv[3], NULL, 0);
     uint32_t f_lo = strtoul(argv[4], NULL, 0);
     uint32_t f_hi = strtoul(argv[5], NULL, 0);
     uint32_t filter_width = strtoul(argv[6], NULL, 0);
@@ -216,6 +216,7 @@ int main(int argc, char **argv) {
     int bytes_read;
     uint32_t total_bytes = 0;
     demod_pkt_t packet;
+    bytes_read = read(src_fd, decoding_buffer, 44); // Read and discard WAV header
 
     while (1) {
         bytes_read = read(src_fd, decoding_buffer, sizeof(decoding_buffer));

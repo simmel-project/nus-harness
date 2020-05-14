@@ -7,10 +7,10 @@
 #include "esplanade_demod.h"
 #include "esplanade_mac.h"
 
-static float FSK_core(demod_sample_t *b, const FSK_demod_const *table) {
-    int32_t j;
-    float corrs[4] = {0, 0, 0, 0};
-    float sum = 0;
+static int32_t FSK_core(demod_sample_t *b, const FSK_demod_const *table) {
+    uint32_t j;
+    int32_t corrs[4] = {0, 0, 0, 0};
+    int32_t sum = 0;
 
     for (j = 0; j < table->filter_size; j++) {
         corrs[0] += b[j] * table->filter_hi_i[j];
@@ -19,16 +19,18 @@ static float FSK_core(demod_sample_t *b, const FSK_demod_const *table) {
         corrs[3] += b[j] * table->filter_lo_q[j];
     }
 
-    // corrs[0] >>= COS_BITS;
-    // corrs[1] >>= COS_BITS;
-    // corrs[2] >>= COS_BITS;
-    // corrs[3] >>= COS_BITS;
+    corrs[0] >>= COS_BITS;
+    corrs[1] >>= COS_BITS;
+    corrs[2] >>= COS_BITS;
+    corrs[3] >>= COS_BITS;
 
     // printf("\n");
     // printf("hi_i: %d\n", corrs[0]);
     // printf("hi_q: %d\n", corrs[1]);
     // printf("lo_i: %d\n", corrs[2]);
     // printf("lo_q: %d\n", corrs[3]);
+
+    // This should use saturating operations!
     sum += (corrs[0] * corrs[0]);
     sum -= (corrs[2] * corrs[2]);
     sum += (corrs[1] * corrs[1]);
@@ -40,7 +42,7 @@ static float FSK_core(demod_sample_t *b, const FSK_demod_const *table) {
 int fsk_demod(const FSK_demod_const *table, FSK_demod_state *state, int *bit,
               demod_sample_t *samples, uint32_t nb) {
     int new_sample;
-    float sum;
+    int32_t sum;
     demod_sample_t *b;
 
     while (nb-- > 0) {
@@ -88,8 +90,8 @@ int fsk_demod(const FSK_demod_const *table, FSK_demod_state *state, int *bit,
         // track variations in the transmitter and receiver clocks.
         if (state->last_sample != new_sample) {
             state->last_sample = new_sample;
-            float nudge;
-            if (state->baud_pll <= 0.5f)
+            int32_t nudge;
+            if (state->baud_pll <= 32768)
                 nudge = state->baud_pll_adj;
             else
                 nudge = -state->baud_pll_adj;
@@ -112,8 +114,8 @@ int fsk_demod(const FSK_demod_const *table, FSK_demod_state *state, int *bit,
 
         // When the PLL exceeds 1, this bit time has finished and we need to
         // move on to the next bit.
-        if (state->baud_pll >= 1.0f) {
-            state->baud_pll -= 1.0f;
+        if (state->baud_pll >= 65536) {
+            state->baud_pll -= 65536;
             // if (run_length < 32)
             // printf("Finished bit.  Transition count: %d  baud=%3.1f%%
             // (%d)\n",
@@ -136,9 +138,9 @@ int fsk_demod(const FSK_demod_const *table, FSK_demod_state *state, int *bit,
 void fsk_demod_init(const FSK_demod_const *table, FSK_demod_state *state) {
     int32_t a;
 
-    state->baud_incr = (float)table->baud_rate / (float)table->sample_rate;
+    state->baud_incr = table->baud_rate * 65536 / table->sample_rate;
     state->baud_pll = 0;
-    state->baud_pll_adj = state->baud_incr / 8;
+    state->baud_pll_adj = state->baud_incr / 4;
 
     assert(table->filter_buf_size < FSK_FILTER_BUF_MAX);
     memset(state->filter_buf, 0,
