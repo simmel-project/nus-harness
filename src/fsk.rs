@@ -68,12 +68,16 @@ impl FskEncoder {
                 self.current_byte >>= 1;
                 self.bit_pos -= 1;
             }
-            output.push(self.phase.cos());
+            output.push(self.phase.sin());
             if self.current_bit == 0 {
                 self.phase += self.omega_lo;
             } else {
                 self.phase += self.omega_hi;
             }
         }
+    }
+
+    pub fn reset(&mut self) {
+        self.phase = 0.0;
     }
 }
