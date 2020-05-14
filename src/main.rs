@@ -83,7 +83,7 @@ struct ModulationConfigC {
     f_lo: u32,
     f_hi: u32,
     filter_width: u32,
-    baud_rate: f32,
+    baud_rate: u32,
 }
 
 extern "C" {
@@ -245,7 +245,7 @@ fn main() -> Result<(), ModulationError> {
                 .short("o")
                 .long("output")
                 .value_name("FILENAME")
-                .help("Name of the wave file to write to"),
+                .help("Name of the wave file to write to. The file extension indicates the format: .wav (wave file), .csv (csv log file)"),
         )
         .arg(
             Arg::with_name("sample-rate")
@@ -271,7 +271,7 @@ fn main() -> Result<(), ModulationError> {
                 .help("Data protocol version"),
         )
         .arg(
-            Arg::with_name("repeats")
+            Arg::with_name("repeat-count")
                 .short("c")
                 .long("repeat-count")
                 .value_name("COUNT")
@@ -338,7 +338,7 @@ fn main() -> Result<(), ModulationError> {
     let target_filename = matches.value_of("output").unwrap_or("output.wav");
     let os_update = matches.is_present("update");
     let play_file = matches.is_present("play");
-    let repeats = matches.value_of("repeats").unwrap().parse::<u32>().unwrap();
+    let repeat_count = matches.value_of("repeat-count").unwrap().parse::<u32>().unwrap();
     let silence_prefix = matches
         .value_of("silence-prefix")
         .map(|s| s.parse::<u32>().unwrap());
@@ -401,10 +401,10 @@ fn main() -> Result<(), ModulationError> {
         sample_rate: output_sample_rate,
     };
 
-    // for f_lo in 8000..9000 {
-    //     cfg.f_lo = f_lo as f64;
+    for f_lo in 8000..9000 {
+        cfg.f_lo = f_lo as f64;
         do_modulation(source_filename, target_filename, play_file, &cfg)?;
-    // }
+    }
 
     Ok(())
 }

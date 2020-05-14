@@ -94,7 +94,7 @@ int fsk_demod(const FSK_demod_const *table, FSK_demod_state *state, int *bit,
             if (state->baud_pll <= 32768)
                 nudge = state->baud_pll_adj;
             else
-                nudge = -state->baud_pll_adj;
+                nudge = -(int32_t)state->baud_pll_adj;
             // printf("Bit transition detected!  pll: %3.1f%% -> %3.1f%% Sum:
             // %0.3f  Bit:"
             //        "%d  Run: %d\n",

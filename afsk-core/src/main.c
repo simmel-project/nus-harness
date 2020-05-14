@@ -20,7 +20,7 @@ struct demod_config {
     uint32_t f_lo;
     uint32_t f_hi;
     uint32_t filter_width;
-    float baud_rate;
+    uint32_t baud_rate;
 };
 
 uint32_t debug_print_sync = 0;
