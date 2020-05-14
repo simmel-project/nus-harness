@@ -24,6 +24,6 @@ fn main() {
         .define("NO_MAIN", Some("bar"))
         .include("afsk-core/include")
         .warnings_into_errors(true)
-        .flag("/PROFILE")
+        .debug(true)
         .compile("afsktest");
 }
