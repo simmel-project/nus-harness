@@ -12,6 +12,7 @@ byteorder = "1.0.0"
 clap = "2.19.3"
 cpal = "0.5.1"
 murmur3 = "0.3.0"
+rand = "0.7.3"
 rust-crypto = "0.2.36"
 
 [build-dependencies]

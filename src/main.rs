@@ -7,6 +7,7 @@ mod wav;
 extern crate clap;
 use clap::{App, Arg};
 
+use rand::prelude::*;
 use std::fs::File;
 use std::io::prelude::*;
 
@@ -340,6 +341,13 @@ fn main() -> Result<(), ModulationError> {
                 .takes_value(true)
                 .help("Number of milliseconds of silence to add to the start"),
         )
+        .arg(
+            Arg::with_name("noise-level")
+                .long("noise")
+                .short("n")
+                .takes_value(true)
+                .help("Amount of noise to add (0.0 .. 1.0)")
+        )
         .get_matches();
 
     let source_filename = matches.value_of("input").unwrap();
@@ -354,6 +362,9 @@ fn main() -> Result<(), ModulationError> {
     let silence_prefix = matches
         .value_of("silence-prefix")
         .map(|s| s.parse::<u32>().unwrap());
+    let noise_level = matches
+        .value_of("noise-level")
+        .map(|s| s.parse::<f64>().unwrap());
     let output_sample_rate = if play_file {
         let endpoint = cpal::default_endpoint().expect("Failed to get default endpoint");
         let format = endpoint
@@ -419,6 +430,7 @@ fn main() -> Result<(), ModulationError> {
         writeln!(output_file, "Baud Rate, F_LO, F_HI, Filter Width, Sample Rate, Total Packets, Packets Decoded, Success Rate").unwrap();
     }
 
+    let mut rng = rand::thread_rng();
     for baud_rate in baud_rate {
         for f_lo in f_lo {
             for f_hi in f_hi {
@@ -426,9 +438,9 @@ fn main() -> Result<(), ModulationError> {
                     cfg.baud_rate = baud_rate as _;
                     cfg.f_lo = f_lo as _;
                     cfg.f_hi = f_hi as _;
-                    println!(
-                        "Modulating with baud_rate: {}, f_lo: {}  f_hi: {}",
-                        cfg.baud_rate, cfg.f_lo, cfg.f_hi
+                    print!(
+                        "PARAMETERS   baud_rate: {:<6}  f_lo: {:<6}  f_hi: {:<6}  filter_width: {:<2}  ",
+                        cfg.baud_rate, cfg.f_lo, cfg.f_hi, filter_width
                     );
                     let (audio_data, packet_count) = do_modulation(source_filename, &cfg)?;
 
@@ -436,7 +448,10 @@ fn main() -> Result<(), ModulationError> {
                         do_play_file(audio_data, output_sample_rate);
                     }
                     let mut output: Vec<i16> = Vec::new();
-                    for sample in audio_data {
+                    for mut sample in audio_data {
+                        if let Some(nl) = noise_level {
+                            sample += rng.gen_range(-nl, nl);
+                        }
                         // Map -1 .. 1 to -32767 .. 32768
                         output.push((sample * 32767.0).round() as i16);
                     }
@@ -452,7 +467,7 @@ fn main() -> Result<(), ModulationError> {
                         let successes = unsafe {
                             attempt_demodulation(&ccfg, output.as_ptr(), output.len() as u32)
                         };
-                        println!("Attempted demod, got {} successes", successes);
+                        println!("DEMOD  {:2}/{:<2} {:.3}%", successes, packet_count, (successes as f64) / (packet_count as f64) * 100.0);
                         writeln!(
                             output_file,
                             "{}, {}, {}, {}, {}, {}, {}, {}",
