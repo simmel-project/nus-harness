@@ -248,9 +248,12 @@ impl Controller {
         }
     }
 
-    pub fn encode(&mut self, input: &[u8], output: &mut Vec<f64>, rate: &EncodingRate) {
+    /// Encode the data into a modulated AFSK signal based on the current modulation settings.
+    /// Return the number of packets that were written.
+    pub fn encode(&mut self, input: &[u8], output: &mut Vec<f64>, rate: &EncodingRate) -> usize {
         let silence_divisor = rate.silence_divisor();
         let file_length = input.len();
+        let mut packet_count = 0;
 
         // Note: Maximum of 65536 blocks
         let blocks = ((file_length as f64 / 256.0).ceil()) as u16;
@@ -258,12 +261,14 @@ impl Controller {
         self.make_silence(250 / silence_divisor, output);
 
         let data = self.make_control_packet(&input);
+        packet_count += 1;
         self.modulator.modulate_pcm(&data, output);
 
         self.make_silence(100 / silence_divisor, output);
 
         // Make two header packets
         let data = self.make_control_packet(&input);
+        packet_count += 1;
         self.modulator.modulate_pcm(&data, output);
 
         self.make_silence(500 / silence_divisor, output);
@@ -281,11 +286,13 @@ impl Controller {
                 }
             }
             let data = self.make_data_packet(&packet_data, packet_num as u16);
+            packet_count += 1;
             self.modulator.modulate_pcm(&data, output);
 
             self.make_silence(80 / silence_divisor, output);
         }
 
         self.make_silence(500 / silence_divisor, output);
+        packet_count
     }
 }

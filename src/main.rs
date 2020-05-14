@@ -1,6 +1,7 @@
 mod controller;
 mod fsk;
 mod modulator;
+mod steppedrange;
 mod wav;
 
 extern crate clap;
@@ -8,6 +9,8 @@ use clap::{App, Arg};
 
 use std::fs::File;
 use std::io::prelude::*;
+
+use steppedrange::{SteppedRange, SteppedRangeError};
 
 // const DEFAULT_SAMPLE_RATE: f64 = 48000.0;
 const DEFAULT_SAMPLE_RATE: f64 = 44100.0;
@@ -33,6 +36,7 @@ enum ModulationError {
     Io(std::io::Error),
     FloatParse(std::num::ParseFloatError),
     IntParse(std::num::ParseIntError),
+    SteppedRangeParse(SteppedRangeError),
 }
 
 impl core::fmt::Display for EncodingRate {
@@ -63,12 +67,19 @@ impl std::convert::From<std::num::ParseIntError> for ModulationError {
     }
 }
 
+impl std::convert::From<SteppedRangeError> for ModulationError {
+    fn from(error: SteppedRangeError) -> Self {
+        ModulationError::SteppedRangeParse(error)
+    }
+}
+
 impl core::fmt::Debug for ModulationError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match &self {
             ModulationError::Io(e) => write!(f, "Io Error {:?}", e),
             ModulationError::FloatParse(e) => write!(f, "Unable to parse float: {:?}", e),
             ModulationError::IntParse(e) => write!(f, "Unable to parse integer: {:?}", e),
+            ModulationError::SteppedRangeParse(e) => write!(f, "Unable to parse range: {:?}", e),
         }
     }
 }
@@ -105,7 +116,8 @@ extern "C" {
 fn do_modulation(
     source_filename: &str,
     cfg: &ModulationConfig,
-) -> Result<Vec<f64>, std::io::Error> {
+) -> Result<(Vec<f64>, usize), std::io::Error> {
+    let mut packet_count = 0;
     let sample_rate = match cfg.data_rate {
         EncodingRate::Low => cfg.sample_rate * 4.0,
         EncodingRate::Mid => cfg.sample_rate * 2.0,
@@ -134,7 +146,7 @@ fn do_modulation(
     }
 
     for _ in 0..cfg.repeat_count {
-        controller.encode(&input_data, &mut audio_data, &cfg.data_rate);
+        packet_count += controller.encode(&input_data, &mut audio_data, &cfg.data_rate);
         let mut pilot_controller = controller::Controller::new(
             cfg.sample_rate,
             cfg.os_update,
@@ -145,7 +157,7 @@ fn do_modulation(
         );
         pilot_controller.pilot(&mut audio_data, &cfg.data_rate);
     }
-    Ok(audio_data)
+    Ok((audio_data, packet_count))
 }
 
 fn do_play_file(audio_data: Vec<f64>, sample_rate: f64) -> ! {
@@ -359,15 +371,15 @@ fn main() -> Result<(), ModulationError> {
     };
     let baud_rate = matches
         .value_of("baud-rate")
-        .map(|s| s.parse::<f64>())
+        .map(|s| SteppedRange::parse(s))
         .unwrap()?;
     let f_lo = matches
         .value_of("f-lo")
-        .map(|s| s.parse::<f64>())
+        .map(|s| SteppedRange::parse(s))
         .unwrap()?;
     let f_hi = matches
         .value_of("f-hi")
-        .map(|s| s.parse::<f64>())
+        .map(|s| SteppedRange::parse(s))
         .unwrap()?;
     let protocol_version = match matches.value_of("version") {
         Some("1") => controller::ProtocolVersion::V1,
@@ -375,7 +387,7 @@ fn main() -> Result<(), ModulationError> {
         Some(x) => panic!("Unrecognized version found: {}", x),
         None => panic!("No protocol version specified"),
     };
-    let filter_width = matches.value_of("filter-width").unwrap().parse()?;
+    let filter_width = SteppedRange::parse(matches.value_of("filter-width").unwrap())?;
     let data_rate = match matches.value_of("encoding-rate") {
         Some("low") => EncodingRate::Low,
         Some("mid") => EncodingRate::Mid,
@@ -393,41 +405,72 @@ fn main() -> Result<(), ModulationError> {
     let mut cfg = ModulationConfig {
         data_rate,
         os_update,
-        baud_rate,
-        f_lo,
-        f_hi,
+        baud_rate: baud_rate.start as _,
+        f_lo: f_lo.start as _,
+        f_hi: f_hi.start as _,
         silence_prefix,
         version: protocol_version,
         repeat_count: repeat_count,
         sample_rate: output_sample_rate,
     };
 
-    for f_lo in 8000..9000 {
-        cfg.f_lo = f_lo as f64;
-        let audio_data = do_modulation(source_filename, &cfg)?;
+    let mut output_file = File::create(target_filename)?;
+    if target_filename.ends_with(".csv") {
+        writeln!(output_file, "Baud Rate, F_LO, F_HI, Filter Width, Sample Rate, Total Packets, Packets Decoded, Success Rate").unwrap();
+    }
 
-        if play_file {
-            do_play_file(audio_data, output_sample_rate);
-        }
-        let mut output: Vec<i16> = Vec::new();
-        for sample in audio_data {
-            // Map -1 .. 1 to -32767 .. 32768
-            output.push((sample * 32767.0).round() as i16);
-        }
+    for baud_rate in baud_rate {
+        for f_lo in f_lo {
+            for f_hi in f_hi {
+                for filter_width in filter_width {
+                    cfg.baud_rate = baud_rate as _;
+                    cfg.f_lo = f_lo as _;
+                    cfg.f_hi = f_hi as _;
+                    println!(
+                        "Modulating with baud_rate: {}, f_lo: {}  f_hi: {}",
+                        cfg.baud_rate, cfg.f_lo, cfg.f_hi
+                    );
+                    let (audio_data, packet_count) = do_modulation(source_filename, &cfg)?;
 
-        if target_filename == "just-decode" {
-            let ccfg = ModulationConfigC {
-                sample_rate: cfg.sample_rate as _,
-                f_lo: cfg.f_lo as _,
-                f_hi: cfg.f_hi as _,
-                filter_width: filter_width,
-                baud_rate: cfg.baud_rate as _,
-            };
-            let successes =
-                unsafe { attempt_demodulation(&ccfg, output.as_ptr(), output.len() as u32) };
-            println!("Attempted demod, got {} successes", successes);
-        } else {
-            wav::write_wav(cfg.sample_rate as u32, &output, target_filename)?;
+                    if play_file {
+                        do_play_file(audio_data, output_sample_rate);
+                    }
+                    let mut output: Vec<i16> = Vec::new();
+                    for sample in audio_data {
+                        // Map -1 .. 1 to -32767 .. 32768
+                        output.push((sample * 32767.0).round() as i16);
+                    }
+
+                    if target_filename.ends_with(".csv") {
+                        let ccfg = ModulationConfigC {
+                            sample_rate: cfg.sample_rate as _,
+                            f_lo: cfg.f_lo as _,
+                            f_hi: cfg.f_hi as _,
+                            filter_width: filter_width as _,
+                            baud_rate: cfg.baud_rate as _,
+                        };
+                        let successes = unsafe {
+                            attempt_demodulation(&ccfg, output.as_ptr(), output.len() as u32)
+                        };
+                        println!("Attempted demod, got {} successes", successes);
+                        writeln!(
+                            output_file,
+                            "{}, {}, {}, {}, {}, {}, {}, {}",
+                            baud_rate,
+                            f_lo,
+                            f_hi,
+                            filter_width,
+                            output_sample_rate,
+                            packet_count,
+                            successes,
+                            (successes as f64) / (packet_count as f64)
+                        )
+                        .unwrap();
+                    } else {
+                        wav::write_wav(cfg.sample_rate as u32, &output, &mut output_file)?;
+                    }
+                }
+            }
         }
     }
 

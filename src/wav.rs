@@ -6,8 +6,7 @@ use self::byteorder::{LittleEndian, WriteBytesExt};
 
 const FORMAT_PCM  : u16 = 1;
 
-pub fn write_wav(rate: u32, samples: &[i16], filename: &str) -> std::io::Result<()> {
-    let mut file = File::create(filename)?;
+pub fn write_wav(rate: u32, samples: &[i16], file: &mut File) -> std::io::Result<()> {
     let bits_per_sample = 16;
     let num_channels = 1;
     /* chunkId */       file.write_all(&[0x52, 0x49, 0x46, 0x46])?;        // 'RIFF'
