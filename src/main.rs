@@ -77,11 +77,25 @@ struct ModulationConfig {
     f_hi: f64,
 }
 
+#[repr(C)]
+struct ModulationConfigC {
+    sample_rate: u32,
+    f_lo: u32,
+    f_hi: u32,
+    filter_width: u32,
+    baud_rate: f32,
+}
+
+extern "C" {
+    fn attempt_demodulation(cfg: *const ModulationConfigC, samples: *const i16, nsamples: u32)
+        -> u32;
+}
+
 fn do_modulation(
     source_filename: &str,
     target_filename: &str,
     play_file: bool,
-    cfg: ModulationConfig,
+    cfg: &ModulationConfig,
 ) -> Result<(), std::io::Error> {
     let sample_rate = match cfg.data_rate {
         EncodingRate::Low => cfg.sample_rate * 4.0,
@@ -105,9 +119,11 @@ fn do_modulation(
     };
     let mut audio_data: Vec<f64> = vec![];
 
+    // Add silence, if it's requested.
     if let Some(silence_msec) = cfg.silence_prefix {
         controller.make_silence(silence_msec, &mut audio_data);
     }
+
     for _ in 0..cfg.repeat_count {
         controller.encode(&input_data, &mut audio_data, &cfg.data_rate);
         let mut pilot_controller = controller::Controller::new(
@@ -193,7 +209,19 @@ fn do_modulation(
             output.push((sample * 32767.0).round() as i16);
         }
 
-        wav::write_wav(cfg.sample_rate as u32, &output, target_filename)?;
+        if target_filename == "just-decode" {
+            let ccfg = ModulationConfigC {
+                sample_rate: cfg.sample_rate as _,
+                f_lo: cfg.f_lo as _,
+                f_hi: cfg.f_hi as _,
+                filter_width: 8,
+                baud_rate: cfg.baud_rate as _,
+            };
+            let successes = unsafe { attempt_demodulation(&ccfg, output.as_ptr(), output.len() as u32) };
+            println!("Attempted demod, got {} successes", successes);
+        } else {
+            wav::write_wav(cfg.sample_rate as u32, &output, target_filename)?;
+        }
     }
     Ok(())
 }
@@ -311,7 +339,9 @@ fn main() -> Result<(), ModulationError> {
     let os_update = matches.is_present("update");
     let play_file = matches.is_present("play");
     let repeats = matches.value_of("repeats").unwrap().parse::<u32>().unwrap();
-    let silence_prefix = matches.value_of("silence-prefix").map(|s| s.parse::<u32>().unwrap());
+    let silence_prefix = matches
+        .value_of("silence-prefix")
+        .map(|s| s.parse::<u32>().unwrap());
     let output_sample_rate = if play_file {
         let endpoint = cpal::default_endpoint().expect("Failed to get default endpoint");
         let format = endpoint
@@ -359,7 +389,7 @@ fn main() -> Result<(), ModulationError> {
         os_update, data_rate, protocol_version
     );
 
-    let cfg = ModulationConfig {
+    let mut cfg = ModulationConfig {
         data_rate,
         os_update,
         baud_rate,
@@ -371,9 +401,9 @@ fn main() -> Result<(), ModulationError> {
         sample_rate: output_sample_rate,
     };
 
-    if let Err(err) = do_modulation(source_filename, target_filename, play_file, cfg) {
-        println!("Unable to modulate: {}", &err);
-        std::process::exit(1);
+    for f_lo in 8000..9000 {
+        cfg.f_lo = f_lo as f64;
+        do_modulation(source_filename, target_filename, play_file, &cfg)?;
     }
 
     Ok(())

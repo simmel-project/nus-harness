@@ -12,16 +12,18 @@ fn main() {
     let mut c_paths = vec![];
     for f in c_files {
         let mut pb = PathBuf::new();
-        pb.push("..");
-        pb.push("afsktest");
+        pb.push("afsk-core");
         pb.push("src");
         pb.push(f);
+        println!("cargo:rerun-if-changed={:?}", pb);
         c_paths.push(pb);
     }
 
     cc::Build::new()
         .files(c_paths)
         .define("NO_MAIN", Some("bar"))
-        .include("../afsktest/include")
+        .include("afsk-core/include")
+        .warnings_into_errors(true)
+        .flag("/PROFILE")
         .compile("afsktest");
 }
