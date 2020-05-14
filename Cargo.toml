@@ -1,5 +1,5 @@
 [package]
-name = "nus-tests"
+name = "nus-harness"
 version = "1.0.0"
 description = "Run several experiments for Near UltraSound"
 authors = ["Sean Cross <sean@xobs.io>"]
