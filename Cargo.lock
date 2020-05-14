@@ -150,7 +150,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "nus-tests"
+name = "nus-harness"
 version = "1.0.0"
 dependencies = [
  "byteorder 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",

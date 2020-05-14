@@ -401,10 +401,10 @@ fn main() -> Result<(), ModulationError> {
         sample_rate: output_sample_rate,
     };
 
-    for f_lo in 8000..9000 {
-        cfg.f_lo = f_lo as f64;
+    // for f_lo in 8000..9000 {
+    //     cfg.f_lo = f_lo as f64;
         do_modulation(source_filename, target_filename, play_file, &cfg)?;
-    }
+    // }
 
     Ok(())
 }

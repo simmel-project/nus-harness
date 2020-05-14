@@ -1,3 +1,4 @@
 {
-    "rust-analyzer.cargoFeatures.allFeatures": false
+    "rust-analyzer.cargoFeatures.allFeatures": false,
+    "rust-analyzer.cargo-watch.enable": false
 }
