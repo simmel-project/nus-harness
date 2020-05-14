@@ -32,6 +32,7 @@ impl EncodingRate {
 enum ModulationError {
     Io(std::io::Error),
     FloatParse(std::num::ParseFloatError),
+    IntParse(std::num::ParseIntError),
 }
 
 impl core::fmt::Display for EncodingRate {
@@ -56,11 +57,18 @@ impl std::convert::From<std::num::ParseFloatError> for ModulationError {
     }
 }
 
+impl std::convert::From<std::num::ParseIntError> for ModulationError {
+    fn from(error: std::num::ParseIntError) -> Self {
+        ModulationError::IntParse(error)
+    }
+}
+
 impl core::fmt::Debug for ModulationError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match &self {
             ModulationError::Io(e) => write!(f, "Io Error {:?}", e),
             ModulationError::FloatParse(e) => write!(f, "Unable to parse float: {:?}", e),
+            ModulationError::IntParse(e) => write!(f, "Unable to parse integer: {:?}", e),
         }
     }
 }
@@ -306,6 +314,14 @@ fn main() -> Result<(), ModulationError> {
                 .help("Lower frequency used for F_HI / F_MARK"),
         )
         .arg(
+            Arg::with_name("filter-width")
+                .long("filter-width")
+                .value_name("FILTER_WIDTH")
+                .takes_value(true)
+                .default_value("8")
+                .help("Width of the filter to use during demodulation")
+        )
+        .arg(
             Arg::with_name("silence-prefix")
                 .long("silence-prefix")
                 .value_name("MSECS")
@@ -359,6 +375,7 @@ fn main() -> Result<(), ModulationError> {
         Some(x) => panic!("Unrecognized version found: {}", x),
         None => panic!("No protocol version specified"),
     };
+    let filter_width = matches.value_of("filter-width").unwrap().parse()?;
     let data_rate = match matches.value_of("encoding-rate") {
         Some("low") => EncodingRate::Low,
         Some("mid") => EncodingRate::Mid,
@@ -403,7 +420,7 @@ fn main() -> Result<(), ModulationError> {
                 sample_rate: cfg.sample_rate as _,
                 f_lo: cfg.f_lo as _,
                 f_hi: cfg.f_hi as _,
-                filter_width: 8,
+                filter_width: filter_width,
                 baud_rate: cfg.baud_rate as _,
             };
             let successes =
