@@ -87,16 +87,17 @@ struct ModulationConfigC {
 }
 
 extern "C" {
-    fn attempt_demodulation(cfg: *const ModulationConfigC, samples: *const i16, nsamples: u32)
-        -> u32;
+    fn attempt_demodulation(
+        cfg: *const ModulationConfigC,
+        samples: *const i16,
+        nsamples: u32,
+    ) -> u32;
 }
 
 fn do_modulation(
     source_filename: &str,
-    target_filename: &str,
-    play_file: bool,
     cfg: &ModulationConfig,
-) -> Result<(), std::io::Error> {
+) -> Result<Vec<f64>, std::io::Error> {
     let sample_rate = match cfg.data_rate {
         EncodingRate::Low => cfg.sample_rate * 4.0,
         EncodingRate::Mid => cfg.sample_rate * 2.0,
@@ -136,96 +137,75 @@ fn do_modulation(
         );
         pilot_controller.pilot(&mut audio_data, &cfg.data_rate);
     }
-
-    if play_file {
-        let endpoint = cpal::default_endpoint().expect("Failed to get default endpoint");
-        let format = endpoint
-            .supported_formats()
-            .unwrap()
-            .next()
-            .expect("Failed to get endpoint format")
-            .with_max_samples_rate();
-        println!("Format selected: {:?}", format);
-
-        let event_loop = cpal::EventLoop::new();
-        let voice_id = event_loop.build_voice(&endpoint, &format).unwrap();
-        event_loop.play(voice_id);
-
-        let audio_data_len = audio_data.len();
-        let mut audio_data_pos = 0;
-        let mut overrun_count = 0;
-
-        // Produce a sinusoid of maximum amplitude.
-        let mut next_value = || {
-            if audio_data_pos >= audio_data_len {
-                overrun_count += 1;
-                // After 250ms of silence, exit the program.
-                if overrun_count > (sample_rate as u32 / 4) {
-                    use std::process;
-                    process::exit(0);
-                }
-                0.0 as f32
-            } else {
-                let val = audio_data[audio_data_pos];
-                audio_data_pos += 1;
-                val as f32
-            }
-        };
-
-        event_loop.run(move |_, buffer| {
-            match buffer {
-                cpal::UnknownTypeBuffer::U16(mut buffer) => {
-                    for sample in buffer.chunks_mut(format.channels.len()) {
-                        let value = ((next_value() * 0.5 + 0.5) * std::u16::MAX as f32) as u16;
-                        for out in sample.iter_mut() {
-                            *out = value;
-                        }
-                    }
-                }
-
-                cpal::UnknownTypeBuffer::I16(mut buffer) => {
-                    for sample in buffer.chunks_mut(format.channels.len()) {
-                        let value = (next_value() * std::i16::MAX as f32) as i16;
-                        for out in sample.iter_mut() {
-                            *out = value;
-                        }
-                    }
-                }
-
-                cpal::UnknownTypeBuffer::F32(mut buffer) => {
-                    for sample in buffer.chunks_mut(format.channels.len()) {
-                        let value = next_value();
-                        for out in sample.iter_mut() {
-                            *out = value;
-                        }
-                    }
-                }
-            };
-        });
-    } else {
-        let mut output: Vec<i16> = Vec::new();
-        for sample in audio_data {
-            // Map -1 .. 1 to -32767 .. 32768
-            output.push((sample * 32767.0).round() as i16);
-        }
-
-        if target_filename == "just-decode" {
-            let ccfg = ModulationConfigC {
-                sample_rate: cfg.sample_rate as _,
-                f_lo: cfg.f_lo as _,
-                f_hi: cfg.f_hi as _,
-                filter_width: 8,
-                baud_rate: cfg.baud_rate as _,
-            };
-            let successes = unsafe { attempt_demodulation(&ccfg, output.as_ptr(), output.len() as u32) };
-            println!("Attempted demod, got {} successes", successes);
-        } else {
-            wav::write_wav(cfg.sample_rate as u32, &output, target_filename)?;
-        }
-    }
-    Ok(())
+    Ok(audio_data)
 }
 
+fn do_play_file(audio_data: Vec<f64>, sample_rate: f64) -> ! {
+    let endpoint = cpal::default_endpoint().expect("Failed to get default endpoint");
+    let format = endpoint
+        .supported_formats()
+        .unwrap()
+        .next()
+        .expect("Failed to get endpoint format")
+        .with_max_samples_rate();
+    println!("Format selected: {:?}", format);
+
+    let event_loop = cpal::EventLoop::new();
+    let voice_id = event_loop.build_voice(&endpoint, &format).unwrap();
+    event_loop.play(voice_id);
+
+    let audio_data_len = audio_data.len();
+    let mut audio_data_pos = 0;
+    let mut overrun_count = 0;
+
+    // Produce a sinusoid of maximum amplitude.
+    let mut next_value = || {
+        if audio_data_pos >= audio_data_len {
+            overrun_count += 1;
+            // After 250ms of silence, exit the program.
+            if overrun_count > (sample_rate as u32 / 4) {
+                use std::process;
+                process::exit(0);
+            }
+            0.0 as f32
+        } else {
+            let val = audio_data[audio_data_pos];
+            audio_data_pos += 1;
+            val as f32
+        }
+    };
+
+    event_loop.run(move |_, buffer| {
+        match buffer {
+            cpal::UnknownTypeBuffer::U16(mut buffer) => {
+                for sample in buffer.chunks_mut(format.channels.len()) {
+                    let value = ((next_value() * 0.5 + 0.5) * std::u16::MAX as f32) as u16;
+                    for out in sample.iter_mut() {
+                        *out = value;
+                    }
+                }
+            }
+
+            cpal::UnknownTypeBuffer::I16(mut buffer) => {
+                for sample in buffer.chunks_mut(format.channels.len()) {
+                    let value = (next_value() * std::i16::MAX as f32) as i16;
+                    for out in sample.iter_mut() {
+                        *out = value;
+                    }
+                }
+            }
+
+            cpal::UnknownTypeBuffer::F32(mut buffer) => {
+                for sample in buffer.chunks_mut(format.channels.len()) {
+                    let value = next_value();
+                    for out in sample.iter_mut() {
+                        *out = value;
+                    }
+                }
+            }
+        };
+    });
+}
 fn main() -> Result<(), ModulationError> {
     let matches = App::new("Love-to-Code Program Modulator")
         .version("1.3")
@@ -338,7 +318,11 @@ fn main() -> Result<(), ModulationError> {
     let target_filename = matches.value_of("output").unwrap_or("output.wav");
     let os_update = matches.is_present("update");
     let play_file = matches.is_present("play");
-    let repeat_count = matches.value_of("repeat-count").unwrap().parse::<u32>().unwrap();
+    let repeat_count = matches
+        .value_of("repeat-count")
+        .unwrap()
+        .parse::<u32>()
+        .unwrap();
     let silence_prefix = matches
         .value_of("silence-prefix")
         .map(|s| s.parse::<u32>().unwrap());
@@ -397,13 +381,37 @@ fn main() -> Result<(), ModulationError> {
         f_hi,
         silence_prefix,
         version: protocol_version,
-        repeat_count: repeats,
+        repeat_count: repeat_count,
         sample_rate: output_sample_rate,
     };
 
     for f_lo in 8000..9000 {
         cfg.f_lo = f_lo as f64;
-        do_modulation(source_filename, target_filename, play_file, &cfg)?;
+        let audio_data = do_modulation(source_filename, &cfg)?;
+
+        if play_file {
+            do_play_file(audio_data, output_sample_rate);
+        }
+        let mut output: Vec<i16> = Vec::new();
+        for sample in audio_data {
+            // Map -1 .. 1 to -32767 .. 32768
+            output.push((sample * 32767.0).round() as i16);
+        }
+
+        if target_filename == "just-decode" {
+            let ccfg = ModulationConfigC {
+                sample_rate: cfg.sample_rate as _,
+                f_lo: cfg.f_lo as _,
+                f_hi: cfg.f_hi as _,
+                filter_width: 8,
+                baud_rate: cfg.baud_rate as _,
+            };
+            let successes =
+                unsafe { attempt_demodulation(&ccfg, output.as_ptr(), output.len() as u32) };
+            println!("Attempted demod, got {} successes", successes);
+        } else {
+            wav::write_wav(cfg.sample_rate as u32, &output, target_filename)?;
+        }
     }
 
     Ok(())
