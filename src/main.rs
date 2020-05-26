@@ -4,10 +4,13 @@ mod modulator;
 mod steppedrange;
 mod wav;
 
-extern crate clap;
 use clap::{App, Arg};
 
+use itertools::iproduct;
+
 use rand::prelude::*;
+use rand_distr::StandardNormal;
+
 use std::fs::File;
 use std::io::prelude::*;
 
@@ -364,7 +367,8 @@ fn main() -> Result<(), ModulationError> {
         .map(|s| s.parse::<u32>().unwrap());
     let noise_level = matches
         .value_of("noise-level")
-        .map(|s| s.parse::<f64>().unwrap());
+        .map(|s| s.parse::<f64>().unwrap())
+        .unwrap_or(0.0);
     let output_sample_rate = if play_file {
         let endpoint = cpal::default_endpoint().expect("Failed to get default endpoint");
         let format = endpoint
@@ -427,65 +431,82 @@ fn main() -> Result<(), ModulationError> {
 
     let mut output_file = File::create(target_filename)?;
     if target_filename.ends_with(".csv") {
-        writeln!(output_file, "Baud Rate, F_LO, F_HI, Filter Width, Sample Rate, Total Packets, Packets Decoded, Success Rate").unwrap();
+        writeln!(output_file, "Noise Level, Baud Rate, F_LO, F_HI, Filter Width, Sample Rate, Total Packets, Packets Decoded, Success Rate").unwrap();
     }
 
     let mut rng = rand::thread_rng();
-    for baud_rate in baud_rate {
-        for f_lo in f_lo {
-            for f_hi in f_hi {
-                for filter_width in filter_width {
-                    cfg.baud_rate = baud_rate as _;
-                    cfg.f_lo = f_lo as _;
-                    cfg.f_hi = f_hi as _;
-                    print!(
-                        "PARAMETERS   baud_rate: {:<6}  f_lo: {:<6}  f_hi: {:<6}  filter_width: {:<2}  ",
-                        cfg.baud_rate, cfg.f_lo, cfg.f_hi, filter_width
-                    );
-                    let (audio_data, packet_count) = do_modulation(source_filename, &cfg)?;
+    let all_params = iproduct!(baud_rate, f_lo, f_hi, filter_width);
+    let mut all_params_shuffled: Vec<(u32, u32, u32, u32)> = all_params.collect();
+    all_params_shuffled.shuffle(&mut rng);
+    println!("Will try {} combinations", all_params_shuffled.len());
+    for (idx, (baud_rate, f_lo, f_hi, filter_width)) in all_params_shuffled.iter().enumerate() {
+        cfg.baud_rate = *baud_rate as _;
+        cfg.f_lo = *f_lo as _;
+        cfg.f_hi = *f_hi as _;
+        print!(
+            "{:<.4}% PARAMETERS   noise: {:<3}  baud_rate: {:<6}  f_lo: {:<6}  f_hi: {:<6}  filter_width: {:<2}  ",
+            idx as f64 / all_params_shuffled.len() as f64 * 100.0,
+            noise_level, cfg.baud_rate, cfg.f_lo, cfg.f_hi, filter_width
+        );
+        let (audio_data, packet_count) = do_modulation(source_filename, &cfg)?;
 
-                    if play_file {
-                        do_play_file(audio_data, output_sample_rate);
-                    }
-                    let mut output: Vec<i16> = Vec::new();
-                    for mut sample in audio_data {
-                        if let Some(nl) = noise_level {
-                            sample += rng.gen_range(-nl, nl);
-                        }
-                        // Map -1 .. 1 to -32767 .. 32768
-                        output.push((sample * 32767.0).round() as i16);
-                    }
+        if play_file {
+            do_play_file(audio_data, output_sample_rate);
+        }
+        let mut output: Vec<i16> = Vec::new();
+        for mut sample in audio_data {
+            if noise_level > 0.0 {
+                let mut rng_sample: f64 = rng.sample(StandardNormal);
+                rng_sample *= 2.0; // (0,1) -> (0,2)
+                rng_sample -= 1.0; // (0,2) -> (-1,1)
+                rng_sample *= noise_level; // (-1,1) -> (-noise_level,noise_level)
+                sample += rng_sample;
 
-                    if target_filename.ends_with(".csv") {
-                        let ccfg = ModulationConfigC {
-                            sample_rate: cfg.sample_rate as _,
-                            f_lo: cfg.f_lo as _,
-                            f_hi: cfg.f_hi as _,
-                            filter_width: filter_width as _,
-                            baud_rate: cfg.baud_rate as _,
-                        };
-                        let successes = unsafe {
-                            attempt_demodulation(&ccfg, output.as_ptr(), output.len() as u32)
-                        };
-                        println!("DEMOD  {:2}/{:<2} {:.3}%", successes, packet_count, (successes as f64) / (packet_count as f64) * 100.0);
-                        writeln!(
-                            output_file,
-                            "{}, {}, {}, {}, {}, {}, {}, {}",
-                            baud_rate,
-                            f_lo,
-                            f_hi,
-                            filter_width,
-                            output_sample_rate,
-                            packet_count,
-                            successes,
-                            (successes as f64) / (packet_count as f64)
-                        )
-                        .unwrap();
-                    } else {
-                        wav::write_wav(cfg.sample_rate as u32, &output, &mut output_file)?;
-                    }
+                // Clamp the sample to the range (-1,1)
+                if sample > 1.0 {
+                    sample = 1.0;
+                }
+                if sample < -1.0 {
+                    sample = -1.0;
                 }
             }
+            // Map -1 .. 1 to -32767 .. 32768
+            output.push((sample * 32767.0).round() as i16);
+        }
+
+        if target_filename.ends_with(".csv") {
+            let ccfg = ModulationConfigC {
+                sample_rate: cfg.sample_rate as _,
+                f_lo: cfg.f_lo as _,
+                f_hi: cfg.f_hi as _,
+                filter_width: *filter_width as _,
+                baud_rate: cfg.baud_rate as _,
+            };
+            let successes =
+                unsafe { attempt_demodulation(&ccfg, output.as_ptr(), output.len() as u32) };
+            println!(
+                "DEMOD  {:2}/{:<2} {:.3}%",
+                successes,
+                packet_count,
+                (successes as f64) / (packet_count as f64) * 100.0
+            );
+            writeln!(
+                output_file,
+                "{}, {}, {}, {}, {}, {}, {}, {}, {}",
+                noise_level,
+                baud_rate,
+                f_lo,
+                f_hi,
+                filter_width,
+                output_sample_rate,
+                packet_count,
+                successes,
+                (successes as f64) / (packet_count as f64)
+            )
+            .unwrap();
+        } else {
+            println!("Appending to wave file {}", target_filename);
+            wav::write_wav(cfg.sample_rate as u32, &output, &mut output_file)?;
         }
     }
 
